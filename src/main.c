@@ -15,6 +15,8 @@ ScrollLayer scrollLayer;
 TextLayer textLayer;
 ResHandle rhStory;
 char strPage[256];
+int nPageSize;
+int nPageOffset = 0;
 #define PAGE_MAX_SIZE 255
 GFont currentFont;
 
@@ -101,24 +103,12 @@ int getPageSize(char* buf, int startPos, int bufCount) {
 	return 0;
 }
 
-void window_load(Window *me) {
-	const GRect max_text_bounds = GRect(0, 0, 144, 2000);
-
-	scroll_layer_init(&scrollLayer, me->layer.bounds);
-	scroll_layer_set_click_config_onto_window(&scrollLayer, me);
-	scroll_layer_set_content_size(&scrollLayer, max_text_bounds.size);
-
-	text_layer_init(&textLayer, max_text_bounds);
-	//text_layer_set_text(&textLayer, "Loading...");
-	currentFont = fonts_get_system_font(FONT_KEY_GOTHIC_24_BOLD);
-	text_layer_set_font(&textLayer, currentFont);
-	//text_layer_set_overflow_mode(&textLayer, GTextOverflowModeWordWrap);
-
-	resource_init_current_app(&APP_RESOURCES);
+void loadPage(int offset) {
 	ResHandle rhStory = resource_get_handle(RESOURCE_ID_STORY);
-	int nLen = resource_load(rhStory, (uint8_t*)strPage, PAGE_MAX_SIZE);
-	nLen = mbTrim(strPage, nLen); // will also set terminating char
-	strPage[getPageSize(strPage, 0, nLen)] = 0; // tmp: trim to just one page
+	nPageSize = resource_load_byte_range(rhStory, offset, (uint8_t*)strPage, PAGE_MAX_SIZE);
+	nPageSize = mbTrim(strPage, nPageSize); // will also set terminating char
+	nPageSize = getPageSize(strPage, 0, nPageSize); // trim to just one page
+	strPage[nPageSize] = 0;
 
 #ifdef LOGGING
 	text_layer_set_text(&textLayer, szLog);
@@ -128,6 +118,39 @@ void window_load(Window *me) {
 	GSize max_size = text_layer_get_max_used_size(app_get_current_graphics_context(), &textLayer);
 	text_layer_set_size(&textLayer, max_size);
 	scroll_layer_set_content_size(&scrollLayer, GSize(144, max_size.h+4));
+	
+	nPageOffset = offset;
+}
+
+void up_single_click_handler(ClickRecognizerRef recognizer, void* context) {
+}
+void down_single_click_handler(ClickRecognizerRef recognizer, void* context) {
+	loadPage(nPageOffset + nPageSize+1);
+}
+
+void scrollLayerConfigureClicks(ClickConfig **config, void* context) {
+	config[BUTTON_ID_UP]->click.handler = up_single_click_handler;
+	config[BUTTON_ID_DOWN]->click.handler = down_single_click_handler;
+}
+
+void window_load(Window *me) {
+	const GRect max_text_bounds = GRect(0, 0, 144, 2000);
+
+	scroll_layer_init(&scrollLayer, me->layer.bounds);
+	scroll_layer_set_click_config_onto_window(&scrollLayer, me);
+	scroll_layer_set_content_size(&scrollLayer, max_text_bounds.size);
+	scroll_layer_set_callbacks(&scrollLayer, (ScrollLayerCallbacks){
+		.click_config_provider = scrollLayerConfigureClicks,
+	});
+
+	text_layer_init(&textLayer, max_text_bounds);
+	//text_layer_set_text(&textLayer, "Loading...");
+	currentFont = fonts_get_system_font(FONT_KEY_GOTHIC_24_BOLD);
+	text_layer_set_font(&textLayer, currentFont);
+	//text_layer_set_overflow_mode(&textLayer, GTextOverflowModeWordWrap);
+
+	resource_init_current_app(&APP_RESOURCES);
+	loadPage(0);
 	
 	scroll_layer_add_child(&scrollLayer, &textLayer.layer);
 	layer_add_child(&me->layer, &scrollLayer.layer);
