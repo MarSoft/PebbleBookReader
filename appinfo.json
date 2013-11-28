@@ -1,0 +1,32 @@
+{
+  "uuid": "87089f81-b806-46c4-bb35-668f5a39aa01",
+  "shortName": "BookReader",
+  "longName": "BookReader",
+  "companyName": "MarSoft",
+  "versionCode": 1,
+  "versionLabel": "1.0.0",
+  "watchapp": {
+    "watchface": false
+  },
+  "appKeys": {},
+  "resources": {
+    "media": [
+      {
+        "type": "raw",
+        "name": "STORY_EN",
+        "file": "data/story_en.txt"
+      },
+      {
+        "type": "raw",
+        "name": "STORY",
+        "file": "data/story.txt"
+      },
+      {
+        "menuIcon": true,
+        "type": "png",
+        "name": "ICON_BOOK",
+        "file": "images/Book02.png"
+      }
+    ]
+  }
+}
