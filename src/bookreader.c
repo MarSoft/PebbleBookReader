@@ -34,7 +34,7 @@ int mbTrim(char* buf, int size) {
 		buf[i] = ' ';
 	
 	int bc = 0; // counter for multibyte continuation bytes at end
-	for(int i=size-1; i>=0; i++) {
+	for(int i=size-1; i>=0; i--) {
 		if(buf[i] >> 7 == 0) { // 0xxxxxxx - one-byte character; it is valid!
 			buf[i+1] = 0; // so make it last significant character in buffer
 			return i+1;
