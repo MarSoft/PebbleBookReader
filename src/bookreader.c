@@ -4,11 +4,14 @@ static Window *window;
 static ScrollLayer *scrollLayer;
 static TextLayer *textLayer;
 static ResHandle rhStory;
-#define PAGE_MAX_SIZE 255
+#define PAGE_MAX_SIZE 180
 char strPage[PAGE_MAX_SIZE*2+1];
 int nPageSize;
 int nPageOffset = 0;
 GFont currentFont;
+AppTimer *scrollTimer = NULL;
+int nScrollPos = 0, nMaxScrollPos = 144;
+int nScrollInterval = 100, nScrollDelta = 3;
 
 #define LOGGING 0
 #if LOGGING
@@ -89,7 +92,7 @@ int getPageSize(char* buf, int startPos, int bufCount) {
 	}
 	// now main logic:
 	GRect maxBox = layer_get_frame(scroll_layer_get_layer(scrollLayer));
-	int maxH = maxBox.size.h; // window height; maybe =144.
+	int maxH = maxBox.size.h; // window height; maybe =144. TODO: Use nMaxScrollPos?
 	maxBox.size.h = 1000; // equals unlimited vertical size; TODO: shrink in order to optimize things?
 	LOG("maxH:%d mBsW:%d\n", maxH, maxBox.size.w);
 
@@ -134,20 +137,49 @@ void loadPage(int offset) {
 	GSize max_size = text_layer_get_content_size(textLayer);
 	text_layer_set_size(textLayer, max_size);
 	scroll_layer_set_content_size(scrollLayer, GSize(144, max_size.h+4));
-	if(offset > 0)
-		scroll_layer_set_content_offset(scrollLayer, GPoint(0, -1), false); // to show upper shadow
+	scroll_layer_set_content_offset(scrollLayer, GPoint(0, 0), false); // scroll to upper border
 
 	nPageOffset = offset;
 }
 
+void tick_handler(void* data) {
+	nScrollPos += nScrollDelta;
+	if(nScrollPos >= nMaxScrollPos) {
+		nScrollPos = nScrollDelta*2;
+		loadPage(nPageOffset + nPageSize + 1); // +1 is a space char
+	}
+	scroll_layer_set_content_offset(scrollLayer, GPoint(0, -nScrollPos), false);
+	scrollTimer = app_timer_register(nScrollInterval, tick_handler, data);
+}
 void up_single_click_handler(ClickRecognizerRef recognizer, void* context) {
-	scroll_layer_scroll_up_click_handler(recognizer, scrollLayer);
+	if(scrollTimer) {
+		if(nScrollDelta > 1)
+			nScrollDelta--;
+		else if(nScrollInterval < 1000)
+			nScrollInterval += 10;
+	} else {
+		scroll_layer_scroll_up_click_handler(recognizer, scrollLayer);
+	}
 }
 void down_single_click_handler(ClickRecognizerRef recognizer, void* context) {
-	scroll_layer_scroll_down_click_handler(recognizer, scrollLayer);
+	if(scrollTimer) {
+		if(nScrollInterval > 100)
+			nScrollInterval -= 10;
+		else if(nScrollDelta < nMaxScrollPos/2)
+			nScrollDelta++;
+	} else {
+		scroll_layer_scroll_down_click_handler(recognizer, scrollLayer);
+	}
 }
 void select_single_click_handler(ClickRecognizerRef recognizer, void* context) {
-	loadPage(nPageOffset + nPageSize + 1); // +1 is a space char
+	if(scrollTimer) { // now scrolling?
+		app_timer_cancel(scrollTimer); // then stop
+		scrollTimer = NULL;
+		light_enable(false);
+	} else { // else starat scrolling
+		scrollTimer = app_timer_register(nScrollDelta, tick_handler, NULL);
+		light_enable(true);
+	}
 }
 
 void scrollLayerConfigureClicks(void* context) {
@@ -168,6 +200,7 @@ void window_load(Window *me) {
 	scroll_layer_set_callbacks(scrollLayer, (ScrollLayerCallbacks){
 		.click_config_provider = scrollLayerConfigureClicks,
 	});
+	nMaxScrollPos = layer_get_frame(scroll_layer_get_layer(scrollLayer)).size.h;
 
 	textLayer = text_layer_create(max_text_bounds);
 	//text_layer_set_text(textLayer, "Loading...");
@@ -186,7 +219,7 @@ void window_unload(Window *me) {
 	text_layer_destroy(textLayer);
 	scroll_layer_destroy(scrollLayer);
 }
-	
+
 void init() {
 	window = window_create();
 	window_set_window_handlers(window, (WindowHandlers){
