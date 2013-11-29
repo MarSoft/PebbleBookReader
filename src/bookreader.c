@@ -10,50 +10,63 @@ int nPageSize;
 int nPageOffset = 0;
 GFont currentFont;
 
-//#define LOGGING
-#ifdef LOGGING
-char szLog[1024];
-int logPos = 0;
-#define LOG(args...) logPos += snprintf(szLog+logPos, 1023-logPos, args)
+#define LOGGING 0
+#if LOGGING
+#define LOG(args...) APP_LOG(APP_LOG_LEVEL_DEBUG, args)
 #else
 #define LOG(args...)
 #endif
 
 /**
-	Trims trailing parts of multibyte characters in buffer
+	Trims buffer at any illegal char
 	(replaces with 0-byte).
-	Also replaces leading illegal bytes with ' '-s.
 	Returns resulting useful buffer size.
 	@buf allocated memory must be at least size+1 !
-	
-	TODO: maybe simplify function - don't check mb char validity and just remove last one?
 */
 int mbTrim(char* buf, int size) {
-	// firstly fix any leading illegal chars
-	for(int i=0; i<size && buf[i] >> 6 == 2; i++)
-		buf[i] = ' ';
-	
-	int bc = 0; // counter for multibyte continuation bytes at end
-	for(int i=size-1; i>=0; i--) {
+	APP_LOG(APP_LOG_LEVEL_DEBUG, "in mbTrim(buf, %d)", size);
+	int cbs = 0; // counter for continuation bytes
+	int cbf = -1; // index of first byte for cbs
+	for(int i=0; i<size; i++) {
 		if(buf[i] >> 7 == 0) { // 0xxxxxxx - one-byte character; it is valid!
-			buf[i+1] = 0; // so make it last significant character in buffer
-			return i+1;
+			if(cbs == 0) { // after full sequence - okay
+				// next
+			} else {
+				// it is not allowed here!
+				APP_LOG(APP_LOG_LEVEL_DEBUG, "unexpected full char at %d", i);
+				buf[cbf] = 0; // clear all that trash
+				return cbf;
+			}
 		} else if(buf[i] >> 6 == 2) { // 10xxxxxx - continuation byte
-			bc++;
-		} else { // 11...... - multibyte character start
-			for(int n=buf[i]; n >> 7 != 0; n = n<<1) bc--;
-			if(bc == 0) { // valid character
-				buf[size] = 0;
-				return size; // multibyte character is okay
-			} else { // invalid - remove it!
-				buf[i] = 0;
+			if(cbs > 0) { // awaiting it -> okay
+				cbs--;
+				if(cbs == 0)
+					cbf = -1;
+			} else { // unexpected
+				APP_LOG(APP_LOG_LEVEL_DEBUG, "unexpected continuation byte at %d", i);
+				buf[i] = 0; // trim it
 				return i;
+			}
+		} else { // 11...... - multibyte character start
+			if(cbs == 0) { // okay, allowed here
+				cbf = i;
+				for(int n=buf[i]; n >> 7 != 0; n = (n<<1) & 0xFF) cbs++;
+				cbs--; // minus this byte
+			} else { // nope, were awaiting continuation byte
+				APP_LOG(APP_LOG_LEVEL_DEBUG, "unexpected starting byte at %d", i);
+				buf[cbf] = 0; // trim
+				return cbf;
 			}
 		}
 	}
-	// if we reached beginning of line without finding anything valid - strange, but maybe, e.g. if line is (almost) empty
-	buf[0] = 0; // clear string
-	return 0;
+	// if traversed the full line without any error
+	if(cbs > 0) { // were awaiting
+		buf[cbf] = 0;
+		return cbf;
+	} else { // clean
+		buf[size] = 0;
+		return size;
+	}
 }
 
 /**
@@ -82,7 +95,7 @@ int getPageSize(char* buf, int startPos, int bufCount) {
 
 	// save current text...
 	const char *currText = text_layer_get_text(textLayer);
-	for(int i = bufCount-1, j=0; i>=startPos && j<100; j++) {
+	for(int i = bufCount-1, j=0; i>=startPos && j<200; j++) {
 		char bak = buf[i+1]; buf[i+1] = 0; // trim string
 		text_layer_set_text(textLayer, buf+startPos);
 		GSize currSize = text_layer_get_content_size(textLayer);
@@ -107,19 +120,17 @@ int getPageSize(char* buf, int startPos, int bufCount) {
 }
 
 void loadPage(int offset) {
-	APP_LOG(APP_LOG_LEVEL_DEBUG, "in loadPage(%d)", offset);
+	LOG("in loadPage(%d)", offset);
 	rhStory = resource_get_handle(RESOURCE_ID_STORY);
 	nPageSize = resource_load_byte_range(rhStory, offset, (uint8_t*)strPage, PAGE_MAX_SIZE*2);
+	LOG("loaded %d bytes", nPageSize);
 	nPageSize = mbTrim(strPage, nPageSize); // will also set terminating char
-	// conditional is to avoid unneccessary work: cuz buffer may be twice as large
-	nPageSize = getPageSize(strPage, 0, nPageSize>PAGE_MAX_SIZE?PAGE_MAX_SIZE:nPageSize);
-	strPage[nPageSize] = '@';
+	LOG("trimmed to %d bytes", nPageSize);
+	// conditional would lead to sometimes broken unicode
+	nPageSize = getPageSize(strPage, 0, nPageSize);
+	//strPage[nPageSize] = '@';
 
-#ifdef LOGGING
-	text_layer_set_text(textLayer, szLog);
-#else
 	text_layer_set_text(textLayer, strPage);
-#endif
 	GSize max_size = text_layer_get_content_size(textLayer);
 	text_layer_set_size(textLayer, max_size);
 	scroll_layer_set_content_size(scrollLayer, GSize(144, max_size.h+4));
